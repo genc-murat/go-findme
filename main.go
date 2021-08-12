@@ -7,6 +7,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -15,28 +16,97 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+//http://www.inanzzz.com/index.php/post/gton/strategy-pattern-models-with-golang?ref=morioh.com
+
+type FileWalkerType int
+
+const (
+	Current FileWalkerType = iota
+	Recursive
+)
+
+type FileWalker interface {
+	List(dir string, query string, regex bool, r *regexp.Regexp)
+}
+
+type CurrentFolderWalker struct{}
+
+func (f *CurrentFolderWalker) List(dir string, query string, regex bool, r *regexp.Regexp) {
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+	for _, f := range files {
+		fmt.Println(f.Name())
+		readFile(dir+"\\"+f.Name(), query, regex, r)
+
+	}
+}
+
+type RecursiveFolderWalker struct{}
+
+func (f *RecursiveFolderWalker) List(dir string, query string, regex bool, r *regexp.Regexp) {
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		fmt.Println(path)
+		readFile(path, query, regex, r)
+		return nil
+	})
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+}
+
+type FileWalkerStrategy struct {
+	fileWalkers map[FileWalkerType]FileWalker
+}
+
+func NewFileWalkerStrategy() *FileWalkerStrategy {
+	return &FileWalkerStrategy{
+		fileWalkers: make(map[FileWalkerType]FileWalker),
+	}
+}
+
+func (f *FileWalkerStrategy) Add(workerType FileWalkerType, fileWalker FileWalker) {
+	f.fileWalkers[workerType] = fileWalker
+}
+
+func (f *FileWalkerStrategy) List(dir string, query string, regex bool, r *regexp.Regexp, walkerType FileWalkerType) {
+	if _, ok := f.fileWalkers[walkerType]; !ok {
+		fmt.Errorf("unknown walkertype")
+	}
+	f.fileWalkers[walkerType].List(dir, query, regex, r)
+}
+
 func main() {
 	var dirPath string
 	var query string
 	var isRegex bool
-
+	var isRecursive bool
+	strategy := NewFileWalkerStrategy()
+	strategy.Add(Current, &CurrentFolderWalker{})
+	strategy.Add(Recursive, &RecursiveFolderWalker{})
 	app := &cli.App{
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:        "dir",
 				Value:       "",
-				Usage:       "Arama yapılacak dizin",
+				Usage:       "Directory",
 				Destination: &dirPath,
 			}, &cli.StringFlag{
 				Name:        "query",
 				Value:       "",
-				Usage:       "Arama...",
+				Usage:       "Search...",
 				Destination: &query,
 			}, &cli.BoolFlag{
 				Name:        "regex",
 				Value:       false,
 				Usage:       "Regex...",
 				Destination: &isRegex,
+			}, &cli.BoolFlag{
+				Name:        "recursive",
+				Value:       false,
+				Usage:       "Scan all subfolders",
+				Destination: &isRecursive,
 			},
 		},
 		Action: func(c *cli.Context) error {
@@ -44,7 +114,14 @@ func main() {
 			if isRegex {
 				regex, _ = regexp.Compile(query)
 			}
-			readDir(dirPath, query, isRegex, regex)
+
+			var walkerType FileWalkerType = Current
+			if isRecursive {
+				walkerType = Recursive
+			}
+
+			strategy.List(dirPath, query, isRegex, regex, walkerType)
+			//readDir(dirPath, query, isRegex, isRecursive, regex)
 			return nil
 		},
 	}
@@ -55,24 +132,35 @@ func main() {
 	}
 }
 
-func readDir(dirName string, query string, regex bool, r *regexp.Regexp) {
-	files, err := os.ReadDir(dirName)
+// func readDir(dirName string, query string, regex bool, recursive bool, r *regexp.Regexp) {
 
-	if err != nil {
-		fmt.Println(err.Error())
-	}
+// 	if recursive {
+// 		err := filepath.Walk(dirName, func(path string, info os.FileInfo, err error) error {
+// 			fmt.Println(path)
+// 			readFile(path, query, regex, r)
+// 			return nil
+// 		})
+// 		if err != nil {
+// 			fmt.Println(err.Error())
+// 		}
+// 	} else {
+// 		files, err := os.ReadDir(dirName)
+// 		if err != nil {
+// 			fmt.Println(err.Error())
+// 		}
+// 		for _, f := range files {
+// 			fmt.Println(f.Name())
+// 			readFile(dirName+"\\"+f.Name(), query, regex, r)
 
-	for _, f := range files {
-		fmt.Println(f.Name())
-		readFile(dirName+"\\"+f.Name(), query, regex, r)
+// 		}
 
-	}
+// 	}
 
-	fmt.Println("**********************************************************")
-	var first string
+// 	fmt.Println("**********************************************************")
+// 	var first string
 
-	fmt.Scanln(&first)
-}
+// 	fmt.Scanln(&first)
+// }
 
 func readFile(fileName string, query string, regex bool, r *regexp.Regexp) {
 
